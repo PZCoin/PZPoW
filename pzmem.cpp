@@ -10,6 +10,11 @@ void PZ_MEM::gen_nonce(unsigned int idx, unsigned char *str) {
 		str[i] = "0123456789abcdef"[memory[idx] >> 4];
 		str[i+1] = "0123456789abcdef"[memory[idx += 997525853] & 0xf];
 	}
+	((uint64_t *)str)[4] = rng();
+	for (int i = 32; i < 40; i += 2) {
+		str[i] = "0123456789abcdef"[str[i] >> 4];
+		str[i+1] = "0123456789abcdef"[str[i] & 0xf];
+	}
 }
 
 void PZ_MEM::init(int seed) {

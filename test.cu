@@ -49,21 +49,24 @@ __global__ void ihatemylife(long long tmp, long long *val) {
 	*val = tmp;
 }
 
-int main() {
+int main(int argc, char *argv[]) {
+	if (argc != 2) {
+		std::cout << "Usage: " << argv[0] << " <seed>\n";
+		return 1;
+	}
 	unsigned char *memory;
 	auto res = cudaMalloc(&memory, MEM_SZ);
 	if (res != cudaSuccess) {
 		std::cout << "Error allocating memory: " << cudaGetErrorString(res) << "\n";
 		return 1;
 	}
-	std::cout << "Seed: ";
 	long long *seed, tmp;
 	res = cudaMalloc(&seed, 8);
 	if (res != cudaSuccess) {
 		std::cout << "Error allocating memory: " << cudaGetErrorString(res) << "\n";
 		return 1;
 	}
-	std::cin >> tmp;
+	tmp = std::stoll(argv[1]);
 	ihatemylife<<<1, 1>>>(tmp, seed);
 	std::cout << "Filling memory...\n";
 	clock_t start = clock();
@@ -81,7 +84,7 @@ int main() {
 	}
 	zero<<<1, 1>>>(tmpnonce);
 	start = clock();
-	for (int i = 0; i < 26843546; i++) {
+	for (int i = 0; i < 26843546 / NUM_THREADS; i++) {
 		gen_nonce<<<1, NUM_THREADS>>>(i, tmpnonce, memory);
 		cudaDeviceSynchronize();
 	}
@@ -92,7 +95,6 @@ int main() {
 		return 1;
 	}
 	double speed = (double)CLOCKS_PER_SEC / (end - start);
-	speed *= NUM_THREADS;
 	std::cout << "Success! Took " << ((double)(end-start) / CLOCKS_PER_SEC) << " seconds.\n";
 	std::cout << "Speed: " << std::fixed << speed << " GB / s\n";
 	std::cout << "Speed: " << speed * 26.8435456 << " MNonces / sec\n";
@@ -100,7 +102,8 @@ int main() {
 	for (int i = 0; i < 4; i++) {
 		gen_nonce<<<1, 1>>>(i, tmpnonce, memory);
 		cudaDeviceSynchronize();
-		cudaMemcpy(tmpnonce2, tmpnonce, 41, cudaMemcpyDeviceToHost);
+		cudaMemcpy(tmpnonce2, tmpnonce, 40, cudaMemcpyDeviceToHost);
+		tmpnonce2[40] = 0;
 		std::cout << tmpnonce2 << '\n';
 	}
 	// get last error

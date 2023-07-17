@@ -1,0 +1,243 @@
+#include "gf.h"
+#include <stdio.h>
+
+// Exponents for calculating square roots and inverses
+static const gf_t GF_SQRT_EXP =
+	"\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+	"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+	"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+	"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+static const gf_t GF_INV_EXP =
+	"\x07\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+	"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+	"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+	"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe";
+
+static void inline _zero_doublelen(char *buf) {
+	asm(".intel_syntax noprefix;"
+		"vpxor ymm1, ymm1, ymm1;"
+		"vmovdqu [%0], ymm1;"
+		"vmovdqu [%0+32], ymm1;"
+		"vmovdqu [%0+64], ymm1;"
+		"vmovdqu [%0+96], ymm1;"
+		"vmovdqu [%0+128], xmm1;"
+		".att_syntax prefix" ::"r"(buf)
+		: "ymm1");
+}
+
+static void inline _zero_len(char *buf) {
+	asm(".intel_syntax noprefix;"
+		"vpxor ymm1, ymm1, ymm1;"
+		"vmovdqu [%0], ymm1;"
+		"vmovdqu [%0+32], ymm1;"
+		".att_syntax prefix" ::"r"(buf)
+		: "ymm1");
+	*(uint64_t *)(buf + 64) = 0;
+}
+
+static void inline _add_doublelen(char *out, const char *a, const char *b) {
+	asm(".intel_syntax noprefix;"
+		"vmovdqu ymm0, [%1];"
+		"vmovdqu ymm1, [%1+32];"
+		"vmovdqu ymm2, [%1+64];"
+		"vmovdqu ymm3, [%1+96];"
+		"vmovdqu xmm4, [%1+128];"
+		"vpxor ymm0, ymm0, [%2];"
+		"vpxor ymm1, ymm1, [%2+32];"
+		"vpxor ymm2, ymm2, [%2+64];"
+		"vpxor ymm3, ymm3, [%2+96];"
+		"vpxor xmm4, xmm4, [%2+128];"
+		"vmovdqu [%0], ymm0;"
+		"vmovdqu [%0+32], ymm1;"
+		"vmovdqu [%0+64], ymm2;"
+		"vmovdqu [%0+96], ymm3;"
+		"vmovdqu [%0+128], xmm4;"
+		".att_syntax prefix"
+		: "=r"(out)
+		: "r"(a), "r"(b)
+		: "ymm0", "ymm1", "ymm2", "ymm3", "ymm4");
+}
+
+static void inline _add_variable_len(char *out, const char *a, const char *b, int alen, int blen) {
+	for (int i = 0; i < min(alen, blen); i++)
+		((uint64_t *)out)[i] = ((uint64_t *)a)[i] ^ ((uint64_t *)b)[i];
+	const char *ptr = alen > blen ? a : b;
+	for (int i = min(alen, blen); i < max(alen, blen); i++)
+		((uint64_t *)out)[i] = ((uint64_t *)ptr)[i];
+}
+
+static void _karatsuba(char *out, const char *a, const char *b, int alen, int blen) {
+	if (alen == 0 || blen == 0)
+		return;
+	if (alen == 1 && blen == 1) {
+		__m128i a1 = _mm_loadu_si128((__m128i *)a);
+		__m128i b1 = _mm_loadu_si128((__m128i *)b);
+		__m128i c1 = _mm_clmulepi64_si128(a1, b1, 0x00);
+		a1 = _mm_loadu_si128((__m128i *)out);
+		a1 = _mm_xor_si128(a1, c1);
+		_mm_storeu_si128((__m128i *)out, a1);
+		return;
+	}
+	if (alen == 1 || blen == 1) {
+		if (alen != 1) {
+			const char *tmp = a;
+			a = b;
+			b = tmp;
+			int tmp2 = alen;
+			alen = blen;
+			blen = tmp2;
+		}
+		for (int i = 0; i <= blen - 2; i += 2) {
+			__m128i a1 = _mm_loadu_si128((__m128i *)a);
+			__m128i b1 = _mm_loadu_si128((__m128i *)(b + i * 16));
+			__m128i c1 = _mm_clmulepi64_si128(a1, b1, 0x00);
+			__m128i c2 = _mm_clmulepi64_si128(a1, b1, 0x10);
+			__m128i d = _mm_loadu_si128((__m128i *)(out + i * 16));
+			d = _mm_xor_si128(d, c1);
+			_mm_storeu_si128((__m128i *)(out + i * 16), d);
+			d = _mm_loadu_si128((__m128i *)(out + i * 16 + 8));
+			d = _mm_xor_si128(d, c2);
+			_mm_storeu_si128((__m128i *)(out + i * 16 + 8), d);
+		}
+		if (blen & 1) {
+			__m128i a1 = _mm_loadu_si128((__m128i *)a);
+			__m128i b1 = _mm_loadu_si128((__m128i *)(b + (blen - 2) * 16));
+			__m128i c1 = _mm_clmulepi64_si128(a1, b1, 0x10);
+			__m128i d = _mm_loadu_si128((__m128i *)(out + (blen - 1) * 16));
+			d = _mm_xor_si128(d, c1);
+			_mm_storeu_si128((__m128i *)(out + (blen - 1) * 16), d);
+		}
+		return;
+	}
+	if (blen < alen) {
+		const char *tmp = a;
+		a = b;
+		b = tmp;
+		int tmp2 = alen;
+		alen = blen;
+		blen = tmp2;
+	}
+	int half = alen / 2;
+	char z2[SIZEOF_GF_T * 2];
+	char z0[SIZEOF_GF_T * 2];
+	char z1[SIZEOF_GF_T * 2];
+	char tmp[SIZEOF_GF_T * 2];
+	_zero_doublelen(z2);
+	_zero_doublelen(z0);
+	_zero_doublelen(z1);
+	_zero_doublelen(tmp);
+	_karatsuba(z2, a + half * 8, b + half * 8, alen - half, blen - half);
+	_karatsuba(z0, a, b, half, half);
+	_add_variable_len(tmp, a, a + half * 8, half, alen - half);
+	_add_variable_len(tmp + SIZEOF_GF_T, b, b + half * 8, half, blen - half);
+	_karatsuba(z1, tmp, tmp + SIZEOF_GF_T, alen - half, blen - half);
+	_add_variable_len(tmp, z0, z2, half * 2, alen + blen - half * 2);
+	_add_variable_len(z1, z1, tmp, alen + blen - half * 2, alen + blen - half * 2);
+
+	_add_variable_len(
+		out + half * 16, out + half * 16, z2, alen + blen - half * 2, alen + blen - half * 2
+	);
+	_add_variable_len(
+		out + half * 8, out + half * 8, z1, alen + blen - half * 2, alen + blen - half * 2
+	);
+	_add_variable_len(out, out, z0, half * 2, half * 2);
+}
+
+int main() {
+	char a[SIZEOF_GF_T] = {0};
+	char b[SIZEOF_GF_T] = {0};
+	a[0] = 0x4d;
+	a[1] = 0xff;
+	a[2] = 0xbe;
+	a[3] = 0xbc;
+	a[4] = 0x8b;
+	a[5] = 0x96;
+	a[6] = 0x9c;
+	a[7] = 0x43;
+	a[8] = 0x45;
+	a[9] = 0x98;
+	a[10] = 0xf4;
+	a[11] = 0x47;
+	a[12] = 0x2a;
+	a[13] = 0xe9;
+	a[14] = 0xb6;
+	a[15] = 0x22;
+	a[16] = 0x22;
+	a[17] = 0x4f;
+	a[18] = 0xe4;
+	a[19] = 0x72;
+	a[20] = 0x49;
+	a[21] = 0x74;
+	a[22] = 0xd8;
+	a[23] = 0x1c;
+	a[24] = 0xec;
+	a[25] = 0xc2;
+	a[26] = 0x2e;
+	a[27] = 0x2f;
+	a[28] = 0x87;
+	a[29] = 0xcc;
+	a[30] = 0xb0;
+	a[31] = 0x93;
+	a[32] = 0x77;
+	a[33] = 0x56;
+	a[34] = 0x85;
+	a[35] = 0x23;
+	a[36] = 0x47;
+	a[37] = 0x3b;
+	a[38] = 0x06;
+	a[39] = 0xeb;
+	b[0] = 0x0d;
+	b[1] = 0xa8;
+	b[2] = 0x03;
+	b[3] = 0x88;
+	b[4] = 0xbb;
+	b[5] = 0xd8;
+	b[6] = 0x97;
+	b[7] = 0xed;
+	b[8] = 0x11;
+	b[9] = 0xea;
+	b[10] = 0x96;
+	b[11] = 0xcf;
+	b[12] = 0x65;
+	b[13] = 0xab;
+	b[14] = 0x33;
+	b[15] = 0xcd;
+	char c[SIZEOF_GF_T * 2] = {0};
+	_karatsuba(c, a, b, 5, 2);
+	for (int i = 0; i < SIZEOF_GF_T * 2; i++)
+		printf("%02x", c[SIZEOF_GF_T * 2 - i - 1] & 0xff);
+	printf("\n");
+}
+
+void GF_mul(gf_t r, const gf_t x, const gf_t y) {
+	char tmp[SIZEOF_GF_T * 2];
+	_zero_doublelen(tmp);
+	// divide by 8 because primitive multiplication can be done on 8 bytes at a time
+	_karatsuba(tmp, x, y, SIZEOF_GF_T / 8, SIZEOF_GF_T / 8);
+	uint64_t carry = 0;
+	for (int i = SIZEOF_GF_T * 2 - 1; i >= SIZEOF_GF_T; i -= 8) {
+		uint64_t bits = *(uint64_t *)(tmp + i);
+		bits = (bits >> 1) | carry;
+		carry = bits << 63;
+		*(uint64_t *)(tmp + i - 70) ^= bits;
+	}
+	_mm256_store_si256((__m256i *)r, _mm256_load_si256((__m256i *)tmp));
+	_mm256_store_si256((__m256i *)(r + 32), _mm256_load_si256((__m256i *)(tmp + 32)));
+	*(uint64_t *)(r + 64) = *(uint64_t *)(tmp + 64);
+}
+
+void GF_div(gf_t r, const gf_t x, const gf_t y) {
+	gf_t tmp;
+	GF_inv(tmp, y);
+	GF_mul(r, x, tmp);
+}
+
+inline void GF_inv(gf_t r, const gf_t x) {
+	GF_pow(r, x, GF_INV_EXP);
+}
+
+void GF_pow(gf_t r, const gf_t x, const gf_t y) {}
+
+inline void GF_sqrt(gf_t r, const gf_t x) {
+	GF_pow(r, x, GF_SQRT_EXP);
+}

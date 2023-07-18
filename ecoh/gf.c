@@ -1,6 +1,4 @@
 #include "gf.h"
-#include <stdio.h>
-#include <string.h>
 
 // Exponents for calculating square roots and inverses
 static const gf_t GF_SQRT_EXP =

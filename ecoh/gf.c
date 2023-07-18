@@ -11,13 +11,13 @@ static const gf_t GF_INV_EXP =
 	"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe";
 
 static void inline _zero_doublelen(char *buf) {
-	_mm256_store_si256((__m256i *)buf, _mm256_setzero_si256());
-	_mm256_store_si256((__m256i *)(buf + 32), _mm256_setzero_si256());
+	_mm256_storeu_si256((__m256i *)buf, _mm256_setzero_si256());
+	_mm256_storeu_si256((__m256i *)(buf + 32), _mm256_setzero_si256());
 	*(uint64_t *)(buf + 64) = 0;
 }
 
 static void inline _zero_len(char *buf) {
-	_mm256_store_si256((__m256i *)buf, _mm256_setzero_si256());
+	_mm256_storeu_si256((__m256i *)buf, _mm256_setzero_si256());
 	*(uint32_t *)(buf + 32) = 0;
 }
 
@@ -27,7 +27,7 @@ void GF_mul(gf_t r, const gf_t x, const gf_t y) {
 
 	// multiply
 	for (int i = 0; i < 5; i++) {
-		if (i == 4) {
+		if (__builtin_expect(i == 4, 0)) {
 			asm("vpxor %%xmm0, %%xmm0, %%xmm0;"
 				"vmovd (%0), %%xmm0" ::"r"(x + i * 8)
 				: "ymm0");
@@ -35,7 +35,7 @@ void GF_mul(gf_t r, const gf_t x, const gf_t y) {
 			asm("vmovq (%0), %%xmm0" ::"r"(x + i * 8) : "ymm0");
 		}
 		for (int j = 0; j < 5; j++) {
-			if (j == 4) {
+			if (__builtin_expect(j == 4, 0)) {
 				asm("vpxor %%xmm1, %%xmm1, %%xmm1;"
 					"vmovd (%0), %%xmm1" ::"r"(y + j * 8)
 					: "ymm1");
@@ -69,14 +69,8 @@ void GF_mul(gf_t r, const gf_t x, const gf_t y) {
 	*(uint32_t *)tmp ^= carry;
 	tmp[35] &= 0x07;
 
-	for (int i = 35; i >= 0; i--) {
-		printf("%02x", tmp[i] & 0xff);
-	}
-	printf("\n");
-
 	_mm256_storeu_si256((__m256i *)r, _mm256_load_si256((__m256i *)tmp));
-	_mm256_storeu_si256((__m256i *)(r + 32), _mm256_load_si256((__m256i *)(tmp + 32)));
-	*(uint32_t *)(r + 64) = *(uint32_t *)(tmp + 64);
+	*(uint32_t *)(r + 32) = *(uint32_t *)(tmp + 32);
 }
 
 void GF_div(gf_t r, const gf_t x, const gf_t y) {
@@ -89,8 +83,87 @@ inline void GF_inv(gf_t r, const gf_t x) {
 	GF_pow(r, x, GF_INV_EXP);
 }
 
-void GF_pow(gf_t r, const gf_t x, const gf_t y) {}
+void GF_pow(gf_t r, const gf_t x, const gf_t y) {
+	gf_t old_r = r;
+	_zero_len(r);
+	r[0] = 1;
+	char tmp[SIZEOF_GF_T];
+	char tmpr[SIZEOF_GF_T];
+	GF_copy(tmp, x);
+	for (int i = 0; i <= SIZEOF_GF_T - 8; i += 8) {
+		uint64_t exp;
+		int j;
+		if (__builtin_expect(i == 32, 0)) {
+			exp = *(uint32_t *)(y + 32);
+			j = 32;
+		} else {
+			exp = *(uint64_t *)(y + i);
+			j = 64;
+		}
+		while (j--) {
+			GF_mul(tmpr, r, r);
+			if (exp & 1) {
+				GF_mul(r, tmpr, tmp);
+			} else {
+				GF_copy(r, tmpr);
+			}
+			exp >>= 1;
+			asm(".intel_syntax noprefix;"
+				"shlq [%0], 1;"
+				"rclq [%0+8], 1;"
+				"rclq [%0+16], 1;"
+				"rclq [%0+24], 1;"
+				"rclq [%0+32], 1;"
+				"rclq [%0+40], 1;"
+				"rclq [%0+48], 1;"
+				"rclq [%0+56], 1;"
+				"rclq [%0+64], 1;"
+				".att_syntax prefix;" ::"r"(tmp));
+			j--;
+			GF_mul(r, tmpr, tmpr);
+			if (exp & 1) {
+				GF_mul(tmpr, r, tmp);
+			} else {
+				GF_copy(tmpr, r);
+			}
+			exp >>= 1;
+			asm(".intel_syntax noprefix;"
+				"shlq [%0], 1;"
+				"rclq [%0+8], 1;"
+				"rclq [%0+16], 1;"
+				"rclq [%0+24], 1;"
+				"rclq [%0+32], 1;"
+				"rclq [%0+40], 1;"
+				"rclq [%0+48], 1;"
+				"rclq [%0+56], 1;"
+				"rclq [%0+64], 1;"
+				".att_syntax prefix;" ::"r"(tmp));
+		}
+	}
+	if (old_r != r) {
+		GF_copy(old_r, r);
+	}
+}
 
 inline void GF_sqrt(gf_t r, const gf_t x) {
 	GF_pow(r, x, GF_SQRT_EXP);
+}
+
+void GF_print(const gf_t x) {
+	for (int i = 35; i >= 0; i--) {
+		printf("%02x", x[i] & 0xff);
+	}
+	printf("\n");
+}
+
+int main() {
+	char a[SIZEOF_GF_T] = {0};
+	char b[SIZEOF_GF_T] = {0};
+	char c[SIZEOF_GF_T] = {0};
+
+	a[0] = 2;
+	b[0] = 2;
+
+	GF_pow(c, a, b);
+	GF_print(c);
 }

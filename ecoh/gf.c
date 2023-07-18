@@ -74,7 +74,7 @@ void GF_mul(gf_t r, const gf_t x, const gf_t y) {
 }
 
 void GF_div(gf_t r, const gf_t x, const gf_t y) {
-	gf_t tmp;
+	char tmp[SIZEOF_GF_T];
 	GF_inv(tmp, y);
 	GF_mul(r, x, tmp);
 }
@@ -87,10 +87,12 @@ void GF_pow(gf_t r, const gf_t x, const gf_t y) {
 	gf_t old_r = r;
 	_zero_len(r);
 	r[0] = 1;
-	char tmp[SIZEOF_GF_T];
-	char tmpr[SIZEOF_GF_T];
-	GF_copy(tmp, x);
-	for (int i = 0; i <= SIZEOF_GF_T - 8; i += 8) {
+	char tmpa[SIZEOF_GF_T];
+	char tmpb[SIZEOF_GF_T];
+	char tmpr_st[SIZEOF_GF_T];
+	gf_t tmpr = tmpr_st;
+	GF_copy(tmpa, x);
+	for (int i = 0; i <= SIZEOF_GF_T - 4; i += 8) {
 		uint64_t exp;
 		int j;
 		if (__builtin_expect(i == 32, 0)) {
@@ -101,46 +103,28 @@ void GF_pow(gf_t r, const gf_t x, const gf_t y) {
 			j = 64;
 		}
 		while (j--) {
-			GF_mul(tmpr, r, r);
 			if (exp & 1) {
-				GF_mul(r, tmpr, tmp);
+				GF_mul(tmpr, r, tmpa);
 			} else {
-				GF_copy(r, tmpr);
+				gf_t t = r;
+				r = tmpr;
+				tmpr = t;
 			}
 			exp >>= 1;
-			asm(".intel_syntax noprefix;"
-				"shlq [%0], 1;"
-				"rclq [%0+8], 1;"
-				"rclq [%0+16], 1;"
-				"rclq [%0+24], 1;"
-				"rclq [%0+32], 1;"
-				"rclq [%0+40], 1;"
-				"rclq [%0+48], 1;"
-				"rclq [%0+56], 1;"
-				"rclq [%0+64], 1;"
-				".att_syntax prefix;" ::"r"(tmp));
+			GF_mul(tmpb, tmpa, tmpa);
 			j--;
-			GF_mul(r, tmpr, tmpr);
 			if (exp & 1) {
-				GF_mul(tmpr, r, tmp);
+				GF_mul(r, tmpr, tmpb);
 			} else {
-				GF_copy(tmpr, r);
+				gf_t t = r;
+				r = tmpr;
+				tmpr = t;
 			}
 			exp >>= 1;
-			asm(".intel_syntax noprefix;"
-				"shlq [%0], 1;"
-				"rclq [%0+8], 1;"
-				"rclq [%0+16], 1;"
-				"rclq [%0+24], 1;"
-				"rclq [%0+32], 1;"
-				"rclq [%0+40], 1;"
-				"rclq [%0+48], 1;"
-				"rclq [%0+56], 1;"
-				"rclq [%0+64], 1;"
-				".att_syntax prefix;" ::"r"(tmp));
+			GF_mul(tmpa, tmpb, tmpb);
 		}
 	}
-	if (old_r != r) {
+	if (r != old_r) {
 		GF_copy(old_r, r);
 	}
 }
@@ -154,16 +138,4 @@ void GF_print(const gf_t x) {
 		printf("%02x", x[i] & 0xff);
 	}
 	printf("\n");
-}
-
-int main() {
-	char a[SIZEOF_GF_T] = {0};
-	char b[SIZEOF_GF_T] = {0};
-	char c[SIZEOF_GF_T] = {0};
-
-	a[0] = 2;
-	b[0] = 2;
-
-	GF_pow(c, a, b);
-	GF_print(c);
 }

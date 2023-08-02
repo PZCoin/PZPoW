@@ -1,3 +1,13 @@
+/**
+ * @file ec.hpp
+ * @author wdotmathree (wdotmathree@gmail.com)
+ * @brief Implements routines on elliptic curve points
+ * @date 2023-08-01
+ *
+ * @copyright Copyright (c) 2023
+ *
+ */
+
 #pragma once
 #ifndef EC_H
 #define EC_H

@@ -1,3 +1,10 @@
+; @file gf.hpp
+; @author wdotmathree (wdotmathree@gmail.com)
+; @brief Enables operations on elements over GF(2^283)
+; @date 2023-08-01
+;
+; @copyright Copyright (c) 2023
+
 section .text
 global GF_equal
 global GF_add

@@ -1,3 +1,13 @@
+/**
+ * @file ec.cpp
+ * @author wdotmathree (wdotmathree@gmail.com)
+ * @brief Implements routines on elliptic curve points
+ * @date 2023-08-01
+ *
+ * @copyright Copyright (c) 2023
+ *
+ */
+
 #include "ec.hpp"
 
 static const gf_t DIV2 = "\x50\x08\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"

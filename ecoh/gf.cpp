@@ -1,3 +1,13 @@
+/**
+ * @file gf.cpp
+ * @author wdotmathree (wdotmathree@gmail.com)
+ * @brief Enables operations on elements over GF(2^283)
+ * @date 2023-08-01
+ *
+ * @copyright Copyright (c) 2023
+ *
+ */
+
 #include "gf.hpp"
 
 // Exponents for calculating square roots and inverses

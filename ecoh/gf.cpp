@@ -1,12 +1,12 @@
-#include "gf.h"
+#include "gf.hpp"
 
 // Exponents for calculating square roots and inverses
 static const gf_t GF_SQRT_EXP =
-	"\x04\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
-	"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00";
+	"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"
+	"\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x04";
 static const gf_t GF_INV_EXP =
-	"\x07\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
-	"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xfe";
+	"\xfe\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff"
+	"\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\xff\x07";
 
 static void inline _zero_doublelen(char *buf) {
 	_mm256_storeu_si256((__m256i *)buf, _mm256_setzero_si256());
@@ -77,7 +77,7 @@ void GF_div(gf_t r, const gf_t x, const gf_t y) {
 	GF_mul(r, x, tmp);
 }
 
-inline void GF_inv(gf_t r, const gf_t x) {
+void GF_inv(gf_t r, const gf_t x) {
 	GF_pow(r, x, GF_INV_EXP);
 }
 
@@ -127,13 +127,13 @@ void GF_pow(gf_t r, const gf_t x, const gf_t y) {
 	}
 }
 
-inline void GF_sqrt(gf_t r, const gf_t x) {
+void GF_sqrt(gf_t r, const gf_t x) {
 	GF_pow(r, x, GF_SQRT_EXP);
 }
 
 void GF_print(const gf_t x) {
-	for (int i = 35; i >= 0; i--) {
-		printf("%02x", x[i] & 0xff);
+	for (int i = SIZEOF_GF_T - 4; i >= 0; i -= 4) {
+		printf("%08x", *(uint32_t *)(x + i));
+		fflush(stdout);
 	}
-	printf("\n");
 }
